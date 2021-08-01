@@ -1,0 +1,18 @@
+[package]
+name = "enet-client"
+version = "0.0.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bytes = "1"
+eventuals = "0.6"
+futures = "0.3"
+paste = "1"
+thiserror = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.6", features = ["codec"] }
+tracing = "0.1"
+
+enet-proto = { path = "../proto" }
