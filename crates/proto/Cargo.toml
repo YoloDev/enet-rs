@@ -2,6 +2,10 @@
 name = "enet-proto"
 version = "0.1.0"
 edition = "2018"
+description = "eNet gateway protocol types"
+license = "MIT"
+authors = ["Aleksander Heintz <alxandr@alxandr.me>"]
+repository = "https://github.com/YoloDev/enet-rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
