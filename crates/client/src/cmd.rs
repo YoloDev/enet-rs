@@ -1,5 +1,5 @@
 use crate::{
-  con::{Connection, RecvError, SendError},
+  conn::{Connection, RecvError, SendError},
   ConnectError,
 };
 use enet_proto::{

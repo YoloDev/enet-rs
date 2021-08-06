@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-  con::{Connection, RecvError},
+  conn::{Connection, RecvError},
   dev::{DeviceValue, DeviceWriter},
   ConnectError,
 };

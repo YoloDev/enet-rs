@@ -5,7 +5,7 @@ macro_rules! bail {
 }
 
 pub mod cmd;
-mod con;
+mod conn;
 pub mod dev;
 mod enc;
 mod evt;
@@ -14,7 +14,7 @@ mod room;
 use std::convert::TryFrom;
 
 pub use cmd::SetValuesCommandError;
-pub use con::ConnectError;
+pub use conn::ConnectError;
 pub use enet_proto::{ItemSetValue, ItemValueRes, SetValue};
 
 use cmd::CommandHandler;
