@@ -10,6 +10,7 @@ use paste::paste;
 use std::{
   convert::{TryFrom, TryInto},
   fmt,
+  time::Duration,
 };
 use thiserror::Error;
 use tokio::{
@@ -18,8 +19,12 @@ use tokio::{
 };
 use tracing::{event, Level};
 
-struct CommandActor {
-  conn: Connection,
+struct CommandActor<A>
+where
+  A: ToSocketAddrs + Clone + Send + Sync,
+{
+  conn: Option<Connection>,
+  addr: A,
   recv: mpsc::Receiver<ActorMessage>,
   response_listener: Option<ResponseListener>,
 }
@@ -83,10 +88,14 @@ define_response_listener! {
   ItemValue(ItemValueRes),
 }
 
-impl CommandActor {
-  fn new(conn: Connection, recv: mpsc::Receiver<ActorMessage>) -> Self {
+impl<A> CommandActor<A>
+where
+  A: ToSocketAddrs + Clone + Send + Sync,
+{
+  fn new(conn: Connection, addr: A, recv: mpsc::Receiver<ActorMessage>) -> Self {
     Self {
-      conn,
+      conn: Some(conn),
+      addr,
       recv,
       response_listener: None,
     }
@@ -94,9 +103,17 @@ impl CommandActor {
 
   async fn run(mut self) {
     loop {
-      let result = tokio::select! {
-        enet = self.conn.recv() => self.handle_enet(enet).await,
-        cmd = self.recv.recv() => self.handle_cmd(cmd).await,
+      let result = if let Some(conn) = self.conn.as_mut() {
+        let sleep = tokio::time::sleep(Duration::from_secs(15));
+
+        tokio::select! {
+          enet = conn.recv() => self.handle_enet(enet).await,
+          cmd = self.recv.recv() => self.handle_cmd(cmd).await,
+          _ = sleep => self.sleep().await,
+        }
+      } else {
+        let cmd = self.recv.recv().await;
+        self.handle_cmd(cmd).await
       };
 
       match result {
@@ -146,12 +163,29 @@ impl CommandActor {
     match msg {
       ActorMessage::Send(req, res) => {
         self.response_listener = Some(res);
+        let conn = match self.conn.as_mut() {
+          Some(conn) => conn,
+          None => {
+            event!(target: "enet-client::cmd", Level::INFO, "Establishing new connection to eNet gateway.");
+            let conn = match Connection::new(self.addr.clone()).await {
+              Ok(conn) => conn,
+              Err(e) => {
+                event!(target: "enet-client::cmd", Level::ERROR, "Failed to establish connection to eNet gateway: {:?}", e);
+                return Err(());
+              }
+            };
+
+            self.conn = Some(conn);
+            self.conn.as_mut().unwrap()
+          }
+        };
+
         let kind = req.body.kind();
-        event!(target: "enet-client::cmd", Level::INFO, message.kind = ?kind, "sending message");
-        match self.conn.send(&req).await {
+        event!(target: "enet-client::cmd", Level::INFO, message.kind = ?kind, "Sending message");
+        match conn.send(&req).await {
           Ok(()) => (),
           Err(e) => {
-            event!(target: "enet-client::cmd", Level::WARN, message.kind = ?kind, "message failed to send");
+            event!(target: "enet-client::cmd", Level::WARN, message.kind = ?kind, "Message failed to send");
             if let Some(listener) = self.response_listener.take() {
               let _ = listener.error(e);
             }
@@ -159,6 +193,13 @@ impl CommandActor {
         }
       }
     }
+    Ok(())
+  }
+
+  async fn sleep(&mut self) -> Result<(), ()> {
+    event!(target: "enet-client::cmd", Level::INFO, "Closing command connection after 15 seconds of innactivity.");
+    self.conn.take(); // drop connection
+
     Ok(())
   }
 }
@@ -172,10 +213,12 @@ pub(crate) struct CommandHandler {
 }
 
 impl CommandHandler {
-  pub(crate) async fn new(addr: impl ToSocketAddrs) -> Result<Self, ConnectError> {
-    let conn = Connection::new(addr).await?;
+  pub(crate) async fn new(
+    addr: impl ToSocketAddrs + Clone + Send + Sync + 'static,
+  ) -> Result<Self, ConnectError> {
+    let conn = Connection::new(addr.clone()).await?;
     let (sender, recv) = mpsc::channel(10);
-    tokio::spawn(CommandActor::new(conn, recv).run());
+    tokio::spawn(CommandActor::new(conn, addr, recv).run());
 
     Ok(Self { sender })
   }
