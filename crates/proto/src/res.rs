@@ -63,6 +63,11 @@ impl_response_type!(GetChannelInfoAllRes => ProtocolVersion::ZeroZeroThree);
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
+pub struct ItemValueRes {}
+impl_response_type!(ItemValueRes => ProtocolVersion::ZeroZeroThree);
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
 pub struct ItemValueSignInRes {}
 impl_response_type!(ItemValueSignInRes => ProtocolVersion::ZeroZeroThree);
 
@@ -91,6 +96,8 @@ pub enum Response {
 
   ItemValueSignIn(ItemValueSignInRes),
 
+  ItemValue(ItemValueRes),
+
   ProjectList(ProjectListRes),
 
   ItemUpdate(ItemUpdateInd),
@@ -118,6 +125,7 @@ try_into!(Version => VersionRes);
 try_into!(GetChannelInfoAll => GetChannelInfoAllRes);
 try_into!(ProjectList => ProjectListRes);
 try_into!(ItemUpdate => ItemUpdateInd);
+try_into!(ItemValue => ItemValueRes);
 try_into!(ItemValueSignIn => ItemValueSignInRes);
 
 impl Response {
@@ -154,6 +162,7 @@ impl Response {
     match_response!(kind, protocol, deserializer => {
       (Version, ZeroZeroThree) => VersionRes,
       (GetChannelInfoAll, ZeroZeroThree) => GetChannelInfoAllRes,
+      (ItemValue, ZeroZeroThree) => ItemValueRes,
       (ItemValueSignIn, ZeroZeroThree) => ItemValueSignInRes,
       (ProjectList, ZeroZeroThree) => ProjectListRes,
       (ItemUpdate, ZeroZeroThree) => ItemUpdateInd,

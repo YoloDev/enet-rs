@@ -5,7 +5,8 @@ use derive_more::{Constructor, From, IsVariant, TryInto};
 use enum_kinds::EnumKind;
 use serde::Serialize;
 use std::{convert::TryFrom, time::SystemTime};
-use value::ItemSetValue;
+
+pub use value::*;
 
 mod sealed {
   pub trait Sealed {}

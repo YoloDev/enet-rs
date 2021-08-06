@@ -1327,6 +1327,7 @@ pub(super) enum ResponseKind {
   Version,
   GetChannelInfoAll,
   ProjectList,
+  ItemValue,
   ItemValueSignIn,
   ItemUpdate,
   Unknown(SmolStr),
@@ -1367,6 +1368,7 @@ response_kind_str! {
   GetChannelInfoAll = "GET_CHANNEL_INFO_ALL_RES",
   ProjectList = "PROJECT_LIST_RES",
   ItemUpdate = "ITEM_UPDATE_IND",
+  ItemValue = "ITEM_VALUE_RES",
   ItemValueSignIn = "ITEM_VALUE_SIGN_IN_RES",
 }
 

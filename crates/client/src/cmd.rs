@@ -3,8 +3,8 @@ use crate::{
   ConnectError,
 };
 use enet_proto::{
-  GetChannelInfoAllReq, GetChannelInfoAllRes, ProjectListReq, ProjectListRes, RequestEnvelope,
-  RequestType, Response, VersionReq, VersionRes,
+  GetChannelInfoAllReq, GetChannelInfoAllRes, ItemSetValue, ItemValueRes, ItemValueSetReq,
+  ProjectListReq, ProjectListRes, RequestEnvelope, RequestType, Response, VersionReq, VersionRes,
 };
 use paste::paste;
 use std::{
@@ -80,6 +80,7 @@ define_response_listener! {
   Version(VersionRes),
   GetChannelInfoAll(GetChannelInfoAllRes),
   GetProject(ProjectListRes),
+  ItemValue(ItemValueRes),
 }
 
 impl CommandActor {
@@ -218,10 +219,13 @@ macro_rules! define_command {
 
       impl CommandHandler {
         #[allow(dead_code)]
-        pub(crate) async fn $name(&mut self) -> Result<$res, [<$name:camel CommandError>]> {
-          let req = $req $((
+        pub(crate) async fn $name(
+          &mut self,
+          $($($arg_i: $arg_t,)*)?
+        ) -> Result<$res, [<$name:camel CommandError>]> {
+          let req = $req::new ($(
             $($arg_i,)*
-          ))?;
+          )?);
 
           Ok(self.send(req).await?)
         }
@@ -233,6 +237,7 @@ macro_rules! define_command {
 define_command!(get_version => VersionReq => VersionRes);
 define_command!(get_channel_info => GetChannelInfoAllReq => GetChannelInfoAllRes);
 define_command!(get_project => ProjectListReq => ProjectListRes);
+define_command!(set_values(values: Vec<ItemSetValue>) => ItemValueSetReq => ItemValueRes);
 
 #[non_exhaustive]
 #[derive(Debug, Error)]

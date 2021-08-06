@@ -13,9 +13,11 @@ mod room;
 
 use std::convert::TryFrom;
 
+pub use cmd::SetValuesCommandError;
 pub use con::ConnectError;
 
 use cmd::CommandHandler;
+use enet_proto::{ItemSetValue, ItemValueRes, SetValue};
 use evt::EventHandler;
 use thiserror::Error;
 use tokio::net::ToSocketAddrs;
@@ -79,6 +81,26 @@ impl EnetClient {
 
   pub fn devices(&self) -> &[Device] {
     &self.devices
+  }
+
+  pub fn device(&self, number: u32) -> Option<&Device> {
+    self.devices.iter().find(|d| d.number() == number)
+  }
+
+  pub async fn set_value(
+    &mut self,
+    number: u32,
+    value: SetValue,
+  ) -> Result<ItemValueRes, SetValuesCommandError> {
+    let values = vec![ItemSetValue { number, value }];
+    self.set_values(values).await
+  }
+
+  pub async fn set_values(
+    &mut self,
+    values: impl IntoIterator<Item = ItemSetValue>,
+  ) -> Result<ItemValueRes, SetValuesCommandError> {
+    self.commands.set_values(values.into_iter().collect()).await
   }
 }
 
