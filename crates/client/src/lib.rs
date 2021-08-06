@@ -15,7 +15,7 @@ use std::convert::TryFrom;
 
 pub use cmd::SetValuesCommandError;
 pub use conn::ConnectError;
-pub use enet_proto::{ItemSetValue, ItemValueRes, SetValue};
+pub use enet_proto::{ClickDuration, ItemSetValue, ItemValueRes, SetValue};
 
 use cmd::CommandHandler;
 use evt::EventHandler;
