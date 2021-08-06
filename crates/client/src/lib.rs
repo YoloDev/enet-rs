@@ -15,9 +15,9 @@ use std::convert::TryFrom;
 
 pub use cmd::SetValuesCommandError;
 pub use con::ConnectError;
+pub use enet_proto::{ItemSetValue, ItemValueRes, SetValue};
 
 use cmd::CommandHandler;
-use enet_proto::{ItemSetValue, ItemValueRes, SetValue};
 use evt::EventHandler;
 use thiserror::Error;
 use tokio::net::ToSocketAddrs;
