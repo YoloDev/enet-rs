@@ -1,6 +1,6 @@
 [package]
 name = "enet-client"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2018"
 description = "eNet gateway client"
 license = "MIT"
