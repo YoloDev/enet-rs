@@ -1,6 +1,6 @@
 [package]
 name = "enet-proto"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2018"
 description = "eNet gateway protocol types"
 license = "MIT"
