@@ -1,6 +1,7 @@
 use std::{
   collections::BTreeMap,
   convert::TryFrom,
+  ops::ControlFlow,
   time::{Duration, SystemTime},
 };
 
@@ -9,6 +10,7 @@ use crate::{
   dev::{DeviceValue, DeviceWriter},
   ConnectError,
 };
+use backoff::{backoff::Backoff, ExponentialBackoff};
 use enet_proto::{ItemValueSignInReq, RequestEnvelope, Response};
 use tokio::{net::ToSocketAddrs, sync::oneshot};
 use tracing::{event, Level};
@@ -30,30 +32,52 @@ impl<A: ToSocketAddrs + Clone> EventActor<A> {
     }
   }
 
-  async fn run(self) {
-    let addr = self.addr;
-    let mut writers = self.writers;
-    let mut probe = self.probe;
-    let mut conn = Connection::new(addr.clone()).await.unwrap();
+  async fn run(mut self) {
+    let mut backoff = ExponentialBackoff::default();
+
+    loop {
+      let sleep_time = self.main(&mut backoff).await;
+      match sleep_time {
+        ControlFlow::Break(()) => return,
+        ControlFlow::Continue(None) => {
+          event!(target: "enet-client::evt", Level::WARN, "ran out of retries - panicing");
+          panic!("event connection ran out of retries.");
+        }
+        ControlFlow::Continue(Some(duration)) => tokio::time::sleep(duration).await,
+      }
+    }
+  }
+
+  async fn main(&mut self, backoff: &mut impl Backoff) -> ControlFlow<(), Option<Duration>> {
+    let mut conn = match Connection::new(self.addr.clone()).await {
+      Ok(conn) => conn,
+      Err(e) => {
+        event!(target: "enet-client::evt", Level::WARN, "failed to open event connection to enet: {:?}", e);
+        return ControlFlow::Continue(backoff.next_backoff());
+      }
+    };
+
+    let subscribe_req = ItemValueSignInReq::new(self.writers.keys().copied().collect());
+    let subscribe_msg = RequestEnvelope::new(subscribe_req.clone());
+    if let Err(e) = conn.send(&subscribe_msg).await {
+      event!(target: "enet-client::evt", Level::WARN, "failed to send subscribe message to enet: {:?}", e);
+      return ControlFlow::Continue(backoff.next_backoff());
+    }
+
     let mut then = SystemTime::now();
-
-    // let subscribe_msg = ItemValueSignInReq::new(writers.keys().collect());
-    // let subscribe_msg = Request::from(subscribe_msg);
-    let subscribe_msg =
-      RequestEnvelope::new(ItemValueSignInReq::new(writers.keys().copied().collect()));
-    let _ = conn.send(&subscribe_msg).await;
-
     loop {
       let duration = SystemTime::now().duration_since(then).unwrap();
       let wait_time = Duration::from_secs(60 * 5) - duration;
 
       let msg = tokio::select! {
-        _ = (&mut probe) => return,
+        _ = (&mut self.probe) => return ControlFlow::Break(()),
         enet = conn.recv() => enet,
         _ = tokio::time::sleep(wait_time) => {
-          let subscribe_msg =
-            RequestEnvelope::new(ItemValueSignInReq::new(writers.keys().copied().collect()));
-          let _ = conn.send(&subscribe_msg).await;
+          let subscribe_msg = RequestEnvelope::new(subscribe_req.clone());
+          if let Err(e) = conn.send(&subscribe_msg).await {
+            event!(target: "enet-client::evt", Level::WARN, "failed to send subscribe message to enet: {:?}", e);
+            return ControlFlow::Continue(backoff.next_backoff());
+          }
           then = SystemTime::now();
           continue;
         }
@@ -64,26 +88,32 @@ impl<A: ToSocketAddrs + Clone> EventActor<A> {
         Result::Ok(v) => v,
         Result::Err(RecvError::Closed(_)) => {
           event!(target: "enet-client::evt", Level::ERROR, "connection closed");
-          return;
+          return ControlFlow::Continue(backoff.next_backoff());
         }
         Result::Err(error) => {
           event!(target: "enet-client::evt", Level::WARN, ?error, "error when receiving event");
-          continue;
+          return ControlFlow::Continue(backoff.next_backoff());
         }
       };
 
       let update = match msg {
-        Response::ItemUpdate(upd) => upd,
-        Response::ItemValueSignIn(_) => continue,
-        _ => {
-          event!(target: "enet-client::evt", Level::WARN, msg.kind = ?msg.kind(), "received wrong message kind on event socket");
+        Response::ItemUpdate(upd) => {
+          backoff.reset();
+          upd
+        }
+        Response::ItemValueSignIn(_) => {
+          backoff.reset();
           continue;
+        }
+        _ => {
+          event!(target: "enet-client::evt", Level::WARN, msg.kind = ?msg.kind(), "received wrong message kind on event socket - starting connection anew");
+          return ControlFlow::Continue(backoff.next_backoff());
         }
       };
 
       for value in update.values {
         let num = value.number;
-        let writer = match writers.get_mut(&num) {
+        let writer = match self.writers.get_mut(&num) {
           None => {
             event!(target: "enet-client::evt", Level::WARN, value.number, %value.value, %value.state, %value.setpoint, "received update for unknown number");
             continue;

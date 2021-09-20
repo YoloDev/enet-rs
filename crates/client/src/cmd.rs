@@ -37,7 +37,7 @@ macro_rules! define_response_listener {
   ($($res:ident($ty:ty)),*$(,)?) => {
     enum ResponseListener {
       $(
-        $res(oneshot::Sender<Result<$ty, SendError>>),
+        $res(oneshot::Sender<Result<$ty, CommandError>>),
       )*
     }
 
@@ -61,7 +61,7 @@ macro_rules! define_response_listener {
         }
       }
 
-      fn error(self, error: SendError) -> Result<(), SendError> {
+      fn error(self, error: CommandError) -> Result<(), CommandError> {
         match self {
           $(
             Self::$res(sender) => sender.send(Err(error)).map_err(Result::unwrap_err),
@@ -71,9 +71,9 @@ macro_rules! define_response_listener {
     }
 
     $(
-      impl From<oneshot::Sender<Result<$ty, SendError>>> for ResponseListener {
+      impl From<oneshot::Sender<Result<$ty, CommandError>>> for ResponseListener {
         #[inline]
-        fn from(sender: oneshot::Sender<Result<$ty, SendError>>) -> Self {
+        fn from(sender: oneshot::Sender<Result<$ty, CommandError>>) -> Self {
           Self::$res(sender)
         }
       }
@@ -128,6 +128,9 @@ where
       Ok(v) => v,
       Err(e) => {
         event!(target: "enet-client::cmd", Level::ERROR, error = ?e, "connection closed");
+        if let Some(listener) = self.response_listener.take() {
+          let _ = listener.error(ConnectionClosed.into());
+        }
         return Err(());
       }
     };
@@ -138,15 +141,17 @@ where
         event!(target: "enet-client::cmd", Level::WARN, message.kind = ?msg.kind(), "no listener available");
         Ok(())
       }
+
       Some(listener) => match listener.accept(msg) {
         Ok(()) => Ok(()),
         Err((None, msg)) => {
           event!(target: "enet-client::cmd", Level::INFO, message.kind = ?msg.kind(), "listener closed");
           Ok(())
         }
+
         Err((Some(listener), msg)) => {
           event!(target: "enet-client::cmd", Level::WARN, message.kind = ?msg.kind(), "wrong listener available");
-          self.response_listener = Some(listener);
+          let _ = listener.error(msg.into());
           Ok(())
         }
       },
@@ -187,12 +192,13 @@ where
           Err(e) => {
             event!(target: "enet-client::cmd", Level::WARN, message.kind = ?kind, "Message failed to send");
             if let Some(listener) = self.response_listener.take() {
-              let _ = listener.error(e);
+              let _ = listener.error(e.into());
             }
           }
         }
       }
     }
+
     Ok(())
   }
 
@@ -226,10 +232,10 @@ impl CommandHandler {
   async fn send<C>(&mut self, command: C) -> Result<C::Response, CommandError>
   where
     C: Command,
-    oneshot::Sender<Result<C::Response, SendError>>: Into<ResponseListener>,
+    oneshot::Sender<Result<C::Response, CommandError>>: Into<ResponseListener>,
   {
     let envelope = RequestEnvelope::new(command);
-    let (sender, receiver) = oneshot::channel::<Result<C::Response, SendError>>();
+    let (sender, receiver) = oneshot::channel::<Result<C::Response, CommandError>>();
     let msg = ActorMessage::Send(envelope, sender.into());
     self.sender.send(msg).await?;
 
@@ -293,6 +299,14 @@ pub enum CommandError {
   ConnectionClosed(#[from] ConnectionClosed),
 
   NoResponse(#[from] NoResponse),
+
+  WrongResponse(Response),
+}
+
+impl From<Response> for CommandError {
+  fn from(r: Response) -> CommandError {
+    CommandError::WrongResponse(r)
+  }
 }
 
 impl From<mpsc::error::SendError<ActorMessage>> for CommandError {

@@ -87,6 +87,13 @@ pub struct ItemUpdateInd {
 }
 impl_response_type!(ItemUpdateInd => ProtocolVersion::ZeroZeroThree);
 
+#[derive(Debug)]
+pub struct UnknownRes {
+  pub kind: String,
+  pub protocol: String,
+  pub values: Value,
+}
+
 #[derive(Debug, From, IsVariant, EnumKind)]
 #[enum_kind(ResponseKind)]
 pub enum Response {
@@ -102,7 +109,7 @@ pub enum Response {
 
   ItemUpdate(ItemUpdateInd),
 
-  Unknown(Value),
+  Unknown(UnknownRes),
 }
 
 macro_rules! try_into {
@@ -178,14 +185,12 @@ fn reconstruct<'de, D>(
 where
   D: Deserializer<'de>,
 {
-  let mut json = serde_json::Value::deserialize(deserializer)?;
-  let obj = json.as_object_mut().unwrap();
-  obj.insert(FIELD_NAME_KIND.into(), Value::String(kind.to_string()));
-  obj.insert(
-    FIELD_NAME_PROTOCOL.into(),
-    Value::String(protocol.to_string()),
-  );
+  let json = serde_json::Value::deserialize(deserializer)?;
 
   event!(target: "enet-proto::res", Level::WARN, %kind, %protocol, %json, "received unknown response type");
-  Ok(Response::Unknown(json))
+  Ok(Response::Unknown(UnknownRes {
+    kind: kind.to_string(),
+    protocol: protocol.to_string(),
+    values: json,
+  }))
 }

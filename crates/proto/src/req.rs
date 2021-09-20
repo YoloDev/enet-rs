@@ -28,31 +28,31 @@ macro_rules! impl_request_type {
   };
 }
 
-#[derive(Serialize, Debug, Constructor)]
+#[derive(Serialize, Debug, Constructor, Clone)]
 #[serde(rename_all = "UPPERCASE")]
 pub struct VersionReq;
 impl_request_type!(VersionReq => ProtocolVersion::ZeroZeroThree);
 
-#[derive(Serialize, Debug, Constructor)]
+#[derive(Serialize, Debug, Constructor, Clone)]
 #[serde(rename_all = "UPPERCASE")]
 pub struct GetChannelInfoAllReq;
 impl_request_type!(GetChannelInfoAllReq => ProtocolVersion::ZeroZeroThree);
 
-#[derive(Serialize, Debug, Constructor)]
+#[derive(Serialize, Debug, Constructor, Clone)]
 #[serde(rename_all = "UPPERCASE")]
 pub struct ItemValueSignInReq {
   pub items: Vec<u32>,
 }
 impl_request_type!(ItemValueSignInReq => ProtocolVersion::ZeroZeroThree);
 
-#[derive(Serialize, Debug, Constructor)]
+#[derive(Serialize, Debug, Constructor, Clone)]
 #[serde(rename_all = "UPPERCASE")]
 pub struct ItemValueSignOutReq {
   pub items: Vec<u32>,
 }
 impl_request_type!(ItemValueSignOutReq => ProtocolVersion::ZeroZeroThree);
 
-#[derive(Serialize, Debug, Constructor)]
+#[derive(Serialize, Debug, Constructor, Clone)]
 #[serde(rename_all = "UPPERCASE")]
 pub struct BlockListReq {
   #[serde(rename = "LIST-RANGE")]
@@ -60,19 +60,19 @@ pub struct BlockListReq {
 }
 impl_request_type!(BlockListReq => ProtocolVersion::ZeroZeroThree);
 
-#[derive(Serialize, Debug, Constructor)]
+#[derive(Serialize, Debug, Constructor, Clone)]
 #[serde(rename_all = "UPPERCASE")]
 pub struct ProjectListReq;
 impl_request_type!(ProjectListReq => ProtocolVersion::ZeroZeroThree);
 
-#[derive(Serialize, Debug, Constructor)]
+#[derive(Serialize, Debug, Constructor, Clone)]
 #[serde(rename_all = "UPPERCASE")]
 pub struct ItemValueSetReq {
   pub values: Vec<ItemSetValue>,
 }
 impl_request_type!(ItemValueSetReq => ProtocolVersion::ZeroZeroThree);
 
-#[derive(Debug, Serialize, From, IsVariant, TryInto, EnumKind)]
+#[derive(Debug, Serialize, From, IsVariant, TryInto, EnumKind, Clone)]
 #[enum_kind(RequestKind)]
 #[serde(tag = "CMD")]
 pub enum Request {
