@@ -11,23 +11,27 @@ use crate::{
   ConnectError,
 };
 use backoff::{backoff::Backoff, ExponentialBackoff};
-use enet_proto::{ItemValueSignInReq, RequestEnvelope, Response};
-use tokio::{net::ToSocketAddrs, sync::oneshot};
+use enet_proto::{ItemUpdateValue, ItemValueSignInReq, RequestEnvelope, Response};
+use tokio::{net::ToSocketAddrs, sync::mpsc};
 use tracing::{event, Level};
 
 struct EventActor<A: ToSocketAddrs + Clone> {
   addr: A,
-  probe: oneshot::Receiver<()>,
+  recv: mpsc::UnboundedReceiver<ActorMessage>,
   writers: BTreeMap<u32, DeviceWriter>,
 }
 
+enum ActorMessage {
+  Update(Vec<ItemUpdateValue>),
+}
+
 impl<A: ToSocketAddrs + Clone> EventActor<A> {
-  fn new(addr: A, probe: oneshot::Receiver<()>, writers: Vec<DeviceWriter>) -> Self {
+  fn new(addr: A, recv: mpsc::UnboundedReceiver<ActorMessage>, writers: Vec<DeviceWriter>) -> Self {
     let writers = writers.into_iter().map(|w| (w.index, w)).collect();
 
     Self {
       addr,
-      probe,
+      recv,
       writers,
     }
   }
@@ -70,7 +74,16 @@ impl<A: ToSocketAddrs + Clone> EventActor<A> {
       let wait_time = Duration::from_secs(60 * 5) - duration;
 
       let msg = tokio::select! {
-        _ = (&mut self.probe) => return ControlFlow::Break(()),
+        v = self.recv.recv() => {
+          match v {
+            None =>
+            return ControlFlow::Break(()),
+            Some(v) => {
+              self.handle_msg(v);
+              continue;
+            }
+          }
+        }
         enet = conn.recv() => enet,
         _ = tokio::time::sleep(wait_time) => {
           let subscribe_msg = RequestEnvelope::new(subscribe_req.clone());
@@ -111,34 +124,47 @@ impl<A: ToSocketAddrs + Clone> EventActor<A> {
         }
       };
 
-      for value in update.values {
-        let num = value.number;
-        let writer = match self.writers.get_mut(&num) {
-          None => {
-            event!(target: "enet-client::evt", Level::WARN, value.number, %value.value, %value.state, %value.setpoint, "received update for unknown number");
-            continue;
-          }
-          Some(v) => v,
-        };
+      self.update_values(update.values);
+    }
+  }
 
-        event!(target: "enet-client::evt", Level::DEBUG, value.number, %value.value, %value.state, %value.setpoint, device.kind = ?writer.desc.kind, device.name = %writer.desc.name, "received update for value");
-        let value = match DeviceValue::try_from(value) {
-          Ok(v) => v,
-          Err(value) => {
-            event!(target: "enet-client::evt", Level::WARN, value.number, %value.value, %value.state, %value.setpoint, device.kind = ?writer.desc.kind, device.name = %writer.desc.name, "failed to convert to DeviceValue");
-            continue;
-          }
-        };
-
-        writer.writer.write(value);
+  fn handle_msg(&mut self, msg: ActorMessage) {
+    match msg {
+      ActorMessage::Update(values) => {
+        event!(target: "enet-client::evt", Level::DEBUG, "received update for values via actor message");
+        event!(target: "enet-client::evt", Level::INFO, "update: {:?}", values);
+        self.update_values(values);
       }
+    }
+  }
+
+  fn update_values(&mut self, values: Vec<ItemUpdateValue>) {
+    for value in values {
+      let num = value.number;
+      let writer = match self.writers.get_mut(&num) {
+        None => {
+          event!(target: "enet-client::evt", Level::WARN, value.number, %value.value, %value.state, %value.setpoint, "received update for unknown number");
+          continue;
+        }
+        Some(v) => v,
+      };
+
+      event!(target: "enet-client::evt", Level::DEBUG, value.number, %value.value, %value.state, %value.setpoint, device.kind = ?writer.desc.kind, device.name = %writer.desc.name, "received update for value");
+      let value = match DeviceValue::try_from(value) {
+        Ok(v) => v,
+        Err(value) => {
+          event!(target: "enet-client::evt", Level::WARN, value.number, %value.value, %value.state, %value.setpoint, device.kind = ?writer.desc.kind, device.name = %writer.desc.name, "failed to convert to DeviceValue");
+          continue;
+        }
+      };
+
+      writer.writer.write(value);
     }
   }
 }
 
 pub(crate) struct EventHandler {
-  #[allow(dead_code)]
-  handle: oneshot::Sender<()>,
+  sender: mpsc::UnboundedSender<ActorMessage>,
 }
 
 impl EventHandler {
@@ -146,9 +172,16 @@ impl EventHandler {
     addr: impl ToSocketAddrs + Clone + Send + Sync + 'static,
     writers: Vec<DeviceWriter>,
   ) -> Result<Self, ConnectError> {
-    let (sender, receiver) = oneshot::channel();
+    let (sender, receiver) = mpsc::unbounded_channel();
     tokio::spawn(EventActor::new(addr, receiver, writers).run());
 
-    Ok(Self { handle: sender })
+    Ok(Self { sender })
+  }
+
+  pub(crate) fn update_values(&mut self, values: Vec<ItemUpdateValue>) -> Result<(), ()> {
+    self
+      .sender
+      .send(ActorMessage::Update(values))
+      .map_err(|_| ())
   }
 }

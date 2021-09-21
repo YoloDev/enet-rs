@@ -15,9 +15,10 @@ use std::convert::TryFrom;
 
 pub use cmd::SetValuesCommandError;
 pub use conn::ConnectError;
+use enet_proto::ItemUpdateValue;
 pub use enet_proto::{ClickDuration, ItemSetValue, ItemValueRes, SetValue};
 
-use cmd::CommandHandler;
+use cmd::{CommandError, CommandHandler, ConnectionClosed};
 use evt::EventHandler;
 use thiserror::Error;
 use tokio::net::ToSocketAddrs;
@@ -91,7 +92,7 @@ impl EnetClient {
     &mut self,
     number: u32,
     value: SetValue,
-  ) -> Result<ItemValueRes, SetValuesCommandError> {
+  ) -> Result<(), SetValuesCommandError> {
     let values = vec![ItemSetValue { number, value }];
     self.set_values(values).await
   }
@@ -99,8 +100,38 @@ impl EnetClient {
   pub async fn set_values(
     &mut self,
     values: impl IntoIterator<Item = ItemSetValue>,
-  ) -> Result<ItemValueRes, SetValuesCommandError> {
-    self.commands.set_values(values.into_iter().collect()).await
+  ) -> Result<(), SetValuesCommandError> {
+    let values: Vec<ItemSetValue> = values.into_iter().collect();
+
+    self.commands.set_values(values.clone()).await?;
+
+    let updates = values
+      .into_iter()
+      .map(|v| {
+        let (state, value) = match v.value {
+          SetValue::On(_) => (String::from("ON"), 1),
+          SetValue::Off(_) => (String::from("OFF"), 0),
+          SetValue::Dimm(v) if v == 0 => (String::from("OFF"), 0),
+          SetValue::Dimm(_) => (String::from("ON"), 1),
+          SetValue::Blinds(v) if v == 0 => (String::from("OFF"), 0),
+          SetValue::Blinds(_) => (String::from("ON"), 1),
+        };
+
+        ItemUpdateValue {
+          number: v.number,
+          value: value.to_string(),
+          state,
+          setpoint: "255".into(),
+        }
+      })
+      .collect();
+
+    self
+      .events
+      .update_values(updates)
+      .map_err(|()| CommandError::ConnectionClosed(ConnectionClosed))?;
+
+    Ok(())
   }
 }
 
