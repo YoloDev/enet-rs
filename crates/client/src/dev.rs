@@ -1,6 +1,6 @@
-use enet_proto::{ItemUpdateValue, ProjectItem};
+use enet_proto::{ItemUpdateValue, ProjectItem, SetValue};
 use eventuals::{Eventual, EventualReader, EventualWriter};
-use std::{cmp::Ordering, convert::TryFrom, fmt, num::NonZeroU8, str::FromStr, sync::Arc};
+use std::{cmp::Ordering, convert::TryFrom, fmt, future::ready, str::FromStr, sync::Arc};
 use thiserror::Error;
 
 pub(crate) struct DeviceDesc {
@@ -37,6 +37,7 @@ impl TryFrom<ProjectItem> for DeviceDesc {
   }
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DeviceKind {
   Binary,
@@ -44,13 +45,32 @@ pub enum DeviceKind {
   Blinds,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DeviceValue {
   Undefined,
   Off,
-  On(OnValue),
+  On(DeviceBrightness),
   AllOff,
   AllOn,
+}
+
+impl From<DeviceState> for DeviceValue {
+  fn from(state: DeviceState) -> Self {
+    match state {
+      DeviceState::Off => DeviceValue::Off,
+      DeviceState::On => DeviceValue::On(DeviceBrightness::MAX),
+    }
+  }
+}
+
+impl From<(DeviceState, DeviceBrightness)> for DeviceValue {
+  fn from((state, brightness): (DeviceState, DeviceBrightness)) -> Self {
+    match state {
+      DeviceState::Off => DeviceValue::Off,
+      DeviceState::On => DeviceValue::On(brightness),
+    }
+  }
 }
 
 impl DeviceValue {
@@ -58,10 +78,10 @@ impl DeviceValue {
     matches!(self, DeviceValue::On(_) | DeviceValue::AllOn)
   }
 
-  pub fn value(&self) -> Option<OnValue> {
+  pub fn brightness(&self) -> Option<DeviceBrightness> {
     match self {
       DeviceValue::On(v) => Some(*v),
-      DeviceValue::AllOn => Some(OnValue::new(100).unwrap()),
+      DeviceValue::AllOn => Some(DeviceBrightness::MAX),
       _ => None,
     }
   }
@@ -93,7 +113,7 @@ impl TryFrom<ItemUpdateValue> for DeviceValue {
     match &*value.state {
       "UNDEFINED" => Ok(DeviceValue::Undefined),
       "OFF" => Ok(DeviceValue::Off),
-      "ON" => match OnValue::from_str(&value.value) {
+      "ON" => match DeviceBrightness::from_str(&value.value) {
         Ok(v) => Ok(DeviceValue::On(v)),
         Err(_) => Err(value),
       },
@@ -130,101 +150,372 @@ impl PartialOrd for DeviceValue {
   }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct OnValue(NonZeroU8);
+pub(crate) struct BinaryDeviceWriter {
+  pub(crate) index: u32,
+  pub(crate) desc: Arc<DeviceDesc>,
+  pub(crate) state_writer: EventualWriter<DeviceState>,
+}
 
-impl fmt::Display for OnValue {
+impl BinaryDeviceWriter {
+  fn desc(&self) -> &DeviceDesc {
+    &*self.desc
+  }
+
+  pub(crate) fn kind(&self) -> DeviceKind {
+    self.desc().kind
+  }
+
+  pub(crate) fn name(&self) -> &str {
+    &*self.desc().name
+  }
+}
+
+pub(crate) struct DimmerDeviceWriter {
+  pub(crate) index: u32,
+  pub(crate) desc: Arc<DeviceDesc>,
+  pub(crate) state_writer: EventualWriter<DeviceState>,
+  pub(crate) brightness_writer: EventualWriter<DeviceBrightness>,
+}
+
+impl DimmerDeviceWriter {
+  fn desc(&self) -> &DeviceDesc {
+    &*self.desc
+  }
+
+  pub(crate) fn kind(&self) -> DeviceKind {
+    self.desc().kind
+  }
+
+  pub(crate) fn name(&self) -> &str {
+    &*self.desc().name
+  }
+}
+
+pub(crate) enum DeviceWriter {
+  Binary(BinaryDeviceWriter),
+  Dimmer(DimmerDeviceWriter),
+}
+
+impl DeviceWriter {
+  fn new_binary(
+    desc: Arc<DeviceDesc>,
+    index: u32,
+    state_writer: EventualWriter<DeviceState>,
+  ) -> Self {
+    DeviceWriter::Binary(BinaryDeviceWriter {
+      index,
+      desc,
+      state_writer,
+    })
+  }
+
+  fn new_dimmer(
+    desc: Arc<DeviceDesc>,
+    index: u32,
+    state_writer: EventualWriter<DeviceState>,
+    brightness_writer: EventualWriter<DeviceBrightness>,
+  ) -> Self {
+    DeviceWriter::Dimmer(DimmerDeviceWriter {
+      index,
+      desc,
+      state_writer,
+      brightness_writer,
+    })
+  }
+
+  pub(crate) fn index(&self) -> u32 {
+    match self {
+      DeviceWriter::Binary(w) => w.index,
+      DeviceWriter::Dimmer(w) => w.index,
+    }
+  }
+
+  fn desc(&self) -> &DeviceDesc {
+    match self {
+      DeviceWriter::Binary(w) => &*w.desc,
+      DeviceWriter::Dimmer(w) => &*w.desc,
+    }
+  }
+
+  pub(crate) fn kind(&self) -> DeviceKind {
+    self.desc().kind
+  }
+
+  pub(crate) fn name(&self) -> &str {
+    &*self.desc().name
+  }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DeviceState {
+  Off,
+  On,
+}
+
+impl From<SetValue> for DeviceState {
+  fn from(v: SetValue) -> Self {
+    match v {
+      SetValue::On(_) => Self::On,
+      SetValue::Off(_) => Self::Off,
+      SetValue::Dimm(0) => Self::Off,
+      SetValue::Dimm(_) => Self::On,
+      SetValue::Blinds(_) => todo!(),
+    }
+  }
+}
+
+impl fmt::Display for DeviceState {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      DeviceState::Off => f.write_str("OFF"),
+      DeviceState::On => f.write_str("ON"),
+    }
+  }
+}
+
+impl FromStr for DeviceState {
+  type Err = ParseDeviceStateError;
+
+  fn from_str(s: &str) -> Result<Self, Self::Err> {
+    match s {
+      "ON" => Ok(Self::On),
+      "OFF" => Ok(Self::Off),
+      _ => Err(ParseDeviceStateError),
+    }
+  }
+}
+
+#[repr(transparent)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DeviceBrightness(u8);
+
+impl DeviceBrightness {
+  pub const MIN: DeviceBrightness = DeviceBrightness(0);
+  pub const MAX: DeviceBrightness = DeviceBrightness(100);
+
+  pub const fn new(value: u8) -> Option<Self> {
+    if value <= 100 {
+      Some(Self(value))
+    } else {
+      None
+    }
+  }
+
   #[inline]
+  pub const fn get(self) -> u8 {
+    self.0
+  }
+}
+
+impl fmt::Debug for DeviceBrightness {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fmt::Debug::fmt(&self.0, f)
+  }
+}
+
+impl fmt::Display for DeviceBrightness {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     fmt::Display::fmt(&self.0, f)
   }
 }
 
-impl OnValue {
-  pub fn new(value: u8) -> Option<OnValue> {
-    match NonZeroU8::new(value) {
-      None => None,
-      Some(_) if value > 100 => None,
-      Some(v) => Some(OnValue(v)),
-    }
-  }
-
-  #[inline]
-  pub fn get(&self) -> u8 {
-    self.0.get()
-  }
-}
-
-impl FromStr for OnValue {
-  type Err = ParseOnValueError;
+impl FromStr for DeviceBrightness {
+  type Err = ParseDeviceBrightnessError;
 
   fn from_str(s: &str) -> Result<Self, Self::Err> {
     if s.len() > 3 || s.is_empty() {
-      return Err(ParseOnValueError);
+      return Err(ParseDeviceBrightnessError);
     }
 
     let mut v = 0u8;
     for b in s.bytes() {
       if !(b'0'..=b'9').contains(&b) {
-        return Err(ParseOnValueError);
+        return Err(ParseDeviceBrightnessError);
       }
 
       v *= 10;
       v += b - b'0';
     }
 
-    match OnValue::new(v) {
-      None => Err(ParseOnValueError),
+    match DeviceBrightness::new(v) {
+      None => Err(ParseDeviceBrightnessError),
       Some(v) => Ok(v),
     }
   }
 }
 
-pub(crate) struct DeviceWriter {
-  pub(crate) index: u32,
-  pub(crate) desc: Arc<DeviceDesc>,
-  pub(crate) writer: EventualWriter<DeviceValue>,
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub enum DeviceGroupState {
+  AllOff,
+  AllOn,
+}
+
+pub trait EnetDevice {
+  fn name(&self) -> &str;
+  fn number(&self) -> u32;
+  fn kind(&self) -> DeviceKind;
+  fn subscribe(&self) -> EventualReader<DeviceValue>;
 }
 
 #[derive(Clone)]
-pub struct Device {
+pub struct BinaryDevice {
   pub(crate) desc: Arc<DeviceDesc>,
-  pub(crate) value: Eventual<DeviceValue>,
+  pub(crate) state: Eventual<DeviceState>,
+}
+
+impl BinaryDevice {
+  fn new(desc: Arc<DeviceDesc>, state: Eventual<DeviceState>) -> Self {
+    Self { desc, state }
+  }
+
+  pub fn subscribe_state(&self) -> EventualReader<DeviceState> {
+    self.state.subscribe()
+  }
+}
+
+impl EnetDevice for BinaryDevice {
+  fn name(&self) -> &str {
+    &*self.desc.name
+  }
+
+  fn number(&self) -> u32 {
+    self.desc.number
+  }
+
+  fn kind(&self) -> DeviceKind {
+    DeviceKind::Binary
+  }
+
+  fn subscribe(&self) -> EventualReader<DeviceValue> {
+    eventuals::map(&self.state, |v| ready(v.into())).subscribe()
+  }
+}
+
+#[derive(Clone)]
+pub struct DimmerDevice {
+  pub(crate) desc: Arc<DeviceDesc>,
+  pub(crate) state: Eventual<DeviceState>,
+  pub(crate) brightness: Eventual<DeviceBrightness>,
+}
+
+impl DimmerDevice {
+  fn new(
+    desc: Arc<DeviceDesc>,
+    state: Eventual<DeviceState>,
+    brightness: Eventual<DeviceBrightness>,
+  ) -> Self {
+    Self {
+      desc,
+      state,
+      brightness,
+    }
+  }
+
+  pub fn subscribe_state(&self) -> EventualReader<DeviceState> {
+    self.state.subscribe()
+  }
+
+  pub fn subscribe_brightness(&self) -> EventualReader<DeviceBrightness> {
+    self.brightness.subscribe()
+  }
+}
+
+impl EnetDevice for DimmerDevice {
+  fn name(&self) -> &str {
+    &*self.desc.name
+  }
+
+  fn number(&self) -> u32 {
+    self.desc.number
+  }
+
+  fn kind(&self) -> DeviceKind {
+    DeviceKind::Dimmer
+  }
+
+  fn subscribe(&self) -> EventualReader<DeviceValue> {
+    let joined = eventuals::join((&self.state, &self.brightness));
+    let mapped = eventuals::map(joined, |v| ready(v.into()));
+    mapped.subscribe()
+  }
+}
+
+#[derive(Clone)]
+pub enum Device {
+  Binary(BinaryDevice),
+  Dimmer(DimmerDevice),
+}
+
+impl EnetDevice for Device {
+  fn name(&self) -> &str {
+    match self {
+      Device::Binary(d) => d.name(),
+      Device::Dimmer(d) => d.name(),
+    }
+  }
+
+  fn number(&self) -> u32 {
+    match self {
+      Device::Binary(d) => d.number(),
+      Device::Dimmer(d) => d.number(),
+    }
+  }
+
+  fn kind(&self) -> DeviceKind {
+    match self {
+      Device::Binary(d) => d.kind(),
+      Device::Dimmer(d) => d.kind(),
+    }
+  }
+
+  fn subscribe(&self) -> EventualReader<DeviceValue> {
+    match self {
+      Device::Binary(d) => d.subscribe(),
+      Device::Dimmer(d) => d.subscribe(),
+    }
+  }
 }
 
 impl Device {
   pub(crate) fn new(desc: DeviceDesc, index: u32) -> (DeviceWriter, Self) {
     let desc = Arc::new(desc);
-    let (writer, value) = Eventual::new();
-
-    let writer = DeviceWriter {
-      index,
-      desc: desc.clone(),
-      writer,
-    };
-    let device = Device { desc, value };
-
-    (writer, device)
+    match desc.kind {
+      DeviceKind::Binary => Self::new_binary(desc, index),
+      DeviceKind::Dimmer => Self::new_dimmer(desc, index),
+      DeviceKind::Blinds => todo!(),
+    }
   }
 
-  pub fn name(&self) -> &str {
-    &self.desc.name
+  fn new_binary(desc: Arc<DeviceDesc>, index: u32) -> (DeviceWriter, Self) {
+    debug_assert_eq!(desc.kind, DeviceKind::Binary);
+
+    let (state_writer, state) = Eventual::new();
+
+    (
+      DeviceWriter::new_binary(desc.clone(), index, state_writer),
+      Self::Binary(BinaryDevice::new(desc, state)),
+    )
   }
 
-  pub fn number(&self) -> u32 {
-    self.desc.number
-  }
+  fn new_dimmer(desc: Arc<DeviceDesc>, index: u32) -> (DeviceWriter, Self) {
+    debug_assert_eq!(desc.kind, DeviceKind::Dimmer);
 
-  pub fn kind(&self) -> DeviceKind {
-    self.desc.kind
-  }
+    let (state_writer, state) = Eventual::new();
+    let (brightness_writer, brightness) = Eventual::new();
 
-  pub fn subscribe(&self) -> EventualReader<DeviceValue> {
-    self.value.subscribe()
+    (
+      DeviceWriter::new_dimmer(desc.clone(), index, state_writer, brightness_writer),
+      Self::Dimmer(DimmerDevice::new(desc, state, brightness)),
+    )
   }
 }
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
-#[error("Failed to parse 'on' value. Must be 1..=100")]
-pub struct ParseOnValueError;
+#[error("Failed to parse 'on' value. Must be 0..=100.")]
+pub struct ParseDeviceBrightnessError;
+
+#[derive(Debug, Error)]
+#[non_exhaustive]
+#[error("Failed to parse state. Must be either 'ON' or 'OFF'.")]
+pub struct ParseDeviceStateError;

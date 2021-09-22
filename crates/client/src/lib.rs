@@ -15,19 +15,16 @@ use std::convert::TryFrom;
 
 pub use cmd::SetValuesCommandError;
 pub use conn::ConnectError;
-use enet_proto::ItemUpdateValue;
+use dev::DeviceState;
+pub use dev::{BinaryDevice, Device, DimmerDevice, EnetDevice};
 pub use enet_proto::{ClickDuration, ItemSetValue, ItemValueRes, SetValue};
 
-use cmd::{CommandError, CommandHandler, ConnectionClosed};
+use crate::{dev::DeviceDesc, room::RoomDesc};
+use cmd::CommandHandler;
 use evt::EventHandler;
 use thiserror::Error;
 use tokio::net::ToSocketAddrs;
 use tracing::{event, instrument, Level};
-
-use crate::{
-  dev::{Device, DeviceDesc},
-  room::RoomDesc,
-};
 
 pub struct EnetClient {
   #[allow(dead_code)]
@@ -102,34 +99,13 @@ impl EnetClient {
     values: impl IntoIterator<Item = ItemSetValue>,
   ) -> Result<(), SetValuesCommandError> {
     let values: Vec<ItemSetValue> = values.into_iter().collect();
-
-    self.commands.set_values(values.clone()).await?;
-
-    let updates = values
-      .into_iter()
-      .map(|v| {
-        let (state, value) = match v.value {
-          SetValue::On(_) => (String::from("ON"), 1),
-          SetValue::Off(_) => (String::from("OFF"), 0),
-          SetValue::Dimm(v) if v == 0 => (String::from("OFF"), 0),
-          SetValue::Dimm(_) => (String::from("ON"), 1),
-          SetValue::Blinds(v) if v == 0 => (String::from("OFF"), 0),
-          SetValue::Blinds(_) => (String::from("ON"), 1),
-        };
-
-        ItemUpdateValue {
-          number: v.number,
-          value: value.to_string(),
-          state,
-          setpoint: "255".into(),
-        }
-      })
+    let new_states = values
+      .iter()
+      .map(|v| (v.number, DeviceState::from(v.value)))
       .collect();
 
-    self
-      .events
-      .update_values(updates)
-      .map_err(|()| CommandError::ConnectionClosed(ConnectionClosed))?;
+    self.commands.set_values(values).await?;
+    let _ = self.events.update_values(new_states);
 
     Ok(())
   }

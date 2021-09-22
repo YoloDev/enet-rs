@@ -1,13 +1,13 @@
 use std::{
   collections::BTreeMap,
-  convert::TryFrom,
   ops::ControlFlow,
+  str::FromStr,
   time::{Duration, SystemTime},
 };
 
 use crate::{
   conn::{Connection, RecvError},
-  dev::{DeviceValue, DeviceWriter},
+  dev::{DeviceBrightness, DeviceState, DeviceWriter},
   ConnectError,
 };
 use backoff::{backoff::Backoff, ExponentialBackoff};
@@ -22,12 +22,12 @@ struct EventActor<A: ToSocketAddrs + Clone> {
 }
 
 enum ActorMessage {
-  Update(Vec<ItemUpdateValue>),
+  SetStates(Vec<(u32, DeviceState)>),
 }
 
 impl<A: ToSocketAddrs + Clone> EventActor<A> {
   fn new(addr: A, recv: mpsc::UnboundedReceiver<ActorMessage>, writers: Vec<DeviceWriter>) -> Self {
-    let writers = writers.into_iter().map(|w| (w.index, w)).collect();
+    let writers = writers.into_iter().map(|w| (w.index(), w)).collect();
 
     Self {
       addr,
@@ -119,46 +119,127 @@ impl<A: ToSocketAddrs + Clone> EventActor<A> {
           continue;
         }
         _ => {
-          event!(target: "enet-client::evt", Level::WARN, msg.kind = ?msg.kind(), "received wrong message kind on event socket - starting connection anew");
+          event!(
+            target: "enet-client::evt",
+            Level::WARN,
+            msg.kind = ?msg.kind(),
+            "received wrong message kind on event socket - starting connection anew");
           return ControlFlow::Continue(backoff.next_backoff());
         }
       };
 
-      self.update_values(update.values);
+      self.update_values_from_enet(update.values);
     }
   }
 
   fn handle_msg(&mut self, msg: ActorMessage) {
     match msg {
-      ActorMessage::Update(values) => {
+      ActorMessage::SetStates(values) => {
         event!(target: "enet-client::evt", Level::DEBUG, "received update for values via actor message");
-        event!(target: "enet-client::evt", Level::INFO, "update: {:?}", values);
-        self.update_values(values);
+        self.update_device_states(values);
       }
     }
   }
 
-  fn update_values(&mut self, values: Vec<ItemUpdateValue>) {
+  fn update_values_from_enet(&mut self, values: Vec<ItemUpdateValue>) {
     for value in values {
       let num = value.number;
       let writer = match self.writers.get_mut(&num) {
         None => {
-          event!(target: "enet-client::evt", Level::WARN, value.number, %value.value, %value.state, %value.setpoint, "received update for unknown number");
+          event!(
+            target: "enet-client::evt",
+            Level::WARN,
+            value.number,
+            %value.value,
+            %value.state,
+            %value.setpoint,
+            "received update for unknown number");
           continue;
         }
         Some(v) => v,
       };
 
-      event!(target: "enet-client::evt", Level::DEBUG, value.number, %value.value, %value.state, %value.setpoint, device.kind = ?writer.desc.kind, device.name = %writer.desc.name, "received update for value");
-      let value = match DeviceValue::try_from(value) {
-        Ok(v) => v,
-        Err(value) => {
-          event!(target: "enet-client::evt", Level::WARN, value.number, %value.value, %value.state, %value.setpoint, device.kind = ?writer.desc.kind, device.name = %writer.desc.name, "failed to convert to DeviceValue");
+      event!(
+        target: "enet-client::evt",
+        Level::DEBUG,
+        value.number,
+        %value.value,
+        %value.state,
+        %value.setpoint,
+        device.kind = ?writer.kind(),
+        device.name = %writer.name(),
+        "received update for value");
+
+      match writer {
+        DeviceWriter::Binary(w) => {
+          if let Ok(state) = DeviceState::from_str(&*value.state) {
+            w.state_writer.write(state);
+          } else {
+            event!(
+              target: "enet-client::evt",
+              Level::WARN,
+              value.number,
+              %value.value,
+              %value.state,
+              %value.setpoint,
+              device.kind = ?w.kind(),
+              device.name = %w.name(),
+              "failed to convert '{}' to DeviceState",
+              value.state);
+          }
+        }
+        DeviceWriter::Dimmer(w) => {
+          if let Ok(state) = DeviceState::from_str(&*value.state) {
+            w.state_writer.write(state);
+          } else {
+            event!(
+              target: "enet-client::evt",
+              Level::WARN,
+              value.number,
+              %value.value,
+              %value.state,
+              %value.setpoint,
+              device.kind = ?w.kind(),
+              device.name = %w.name(),
+              "failed to convert '{}' to DeviceState",
+              value.state);
+          }
+
+          if let Ok(brightness) = DeviceBrightness::from_str(&*value.value) {
+            w.brightness_writer.write(brightness);
+          } else {
+            event!(
+              target: "enet-client::evt",
+              Level::WARN,
+              value.number,
+              %value.value,
+              %value.state,
+              %value.setpoint,
+              device.kind = ?w.kind(),
+              device.name = %w.name(),
+              "failed to convert '{}' to DeviceBrightness",
+              value.value);
+          }
+        }
+      }
+    }
+  }
+
+  fn update_device_states(&mut self, values: Vec<(u32, DeviceState)>) {
+    for (num, state) in values {
+      let writer = match self.writers.get_mut(&num) {
+        None => {
+          event!(target: "enet-client::evt", Level::WARN, value.number = num, value.state = %state, "received update for unknown number");
           continue;
         }
+        Some(v) => v,
       };
 
-      writer.writer.write(value);
+      event!(target: "enet-client::evt", Level::DEBUG, value.number = num, value.state = %state, device.kind = ?writer.kind(), device.name = %writer.name(), "received manual update for value");
+      match writer {
+        DeviceWriter::Binary(w) => w.state_writer.write(state),
+        DeviceWriter::Dimmer(w) => w.state_writer.write(state),
+      }
     }
   }
 }
@@ -178,10 +259,10 @@ impl EventHandler {
     Ok(Self { sender })
   }
 
-  pub(crate) fn update_values(&mut self, values: Vec<ItemUpdateValue>) -> Result<(), ()> {
+  pub(crate) fn update_values(&mut self, values: Vec<(u32, DeviceState)>) -> Result<(), ()> {
     self
       .sender
-      .send(ActorMessage::Update(values))
+      .send(ActorMessage::SetStates(values))
       .map_err(|_| ())
   }
 }
