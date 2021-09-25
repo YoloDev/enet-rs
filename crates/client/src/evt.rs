@@ -207,6 +207,8 @@ impl<A: ToSocketAddrs + Clone> EventActor<A> {
 
           if let Ok(brightness) = DeviceBrightness::from_str(&*value.value) {
             w.brightness_writer.write(brightness);
+          } else if &*value.value == "-1" {
+            w.brightness_writer.write(DeviceBrightness::MIN);
           } else {
             event!(
               target: "enet-client::evt",

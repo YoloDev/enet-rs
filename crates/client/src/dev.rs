@@ -60,6 +60,7 @@ impl From<DeviceState> for DeviceValue {
     match state {
       DeviceState::Off => DeviceValue::Off,
       DeviceState::On => DeviceValue::On(DeviceBrightness::MAX),
+      DeviceState::Unknown => DeviceValue::Undefined,
     }
   }
 }
@@ -69,6 +70,7 @@ impl From<(DeviceState, DeviceBrightness)> for DeviceValue {
     match state {
       DeviceState::Off => DeviceValue::Off,
       DeviceState::On => DeviceValue::On(brightness),
+      DeviceState::Unknown => DeviceValue::Undefined,
     }
   }
 }
@@ -250,6 +252,7 @@ impl DeviceWriter {
 pub enum DeviceState {
   Off,
   On,
+  Unknown,
 }
 
 impl From<SetValue> for DeviceState {
@@ -269,6 +272,7 @@ impl fmt::Display for DeviceState {
     match self {
       DeviceState::Off => f.write_str("OFF"),
       DeviceState::On => f.write_str("ON"),
+      DeviceState::Unknown => f.write_str("UNKNOWN"),
     }
   }
 }
@@ -280,6 +284,7 @@ impl FromStr for DeviceState {
     match s {
       "ON" => Ok(Self::On),
       "OFF" => Ok(Self::Off),
+      "UNKNOWN" | "UNDEFINED" => Ok(Self::Unknown),
       _ => Err(ParseDeviceStateError),
     }
   }
