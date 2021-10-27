@@ -4,6 +4,17 @@ on:
   - push
   - pull_request
 
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: full
+  RUSTC_WRAPPER: sccache
+  SCCACHE_IDLE_TIMEOUT: "0"
+  AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
+
 jobs:
   test:
     name: Test
@@ -16,6 +27,32 @@ jobs:
     steps:
       - run: git config --global core.autocrlf false
         name: Disable autocrlf
+
+      - name: Install sccache (ubuntu-latest)
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          LINK: https://github.com/mozilla/sccache/releases/download
+          SCCACHE_VERSION: "0.2.15"
+        run: |
+          SCCACHE_FILE=sccache-$SCCACHE_VERSION-x86_64-unknown-linux-musl
+          mkdir -p $HOME/.local/bin
+          curl -L "$LINK/$SCCACHE_VERSION/$SCCACHE_FILE.tar.gz" | tar xz
+          mv -f $SCCACHE_FILE/sccache $HOME/.local/bin/sccache
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install sccache (macos-latest)
+        if: matrix.os == 'macos-latest'
+        run: |
+          brew update
+          brew install sccache
+
+      - uses: MinoruSekine/setup-scoop
+        if: matrix.os == 'windows-latest'
+      - name: Install sccache (windows-latest)
+        if: matrix.os == 'windows-latest'
+        run: |
+          scoop install sccache
+
       - uses: actions/checkout@v2
       - name: Install latest nightly
         uses: actions-rs/toolchain@v1
@@ -24,8 +61,16 @@ jobs:
           profile: minimal
           override: true
 
+      - name: Start sccache server
+        run: sccache --start-server
+
       - name: Run tests
         uses: actions-rs/cargo@v1
         with:
           command: test
           args: --all --all-features
+
+      - name: Print sccache stats
+        run: sccache --show-stats
+      - name: Stop sccache server
+        run: sccache --stop-server || true
