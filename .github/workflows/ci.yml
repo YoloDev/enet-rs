@@ -17,6 +17,7 @@ env:
   AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
   RUST_LOG: sccache=trace
+  SCCACHE_ERROR_LOG: $HOME/sccache.log
 
 jobs:
   test:
@@ -86,4 +87,4 @@ jobs:
       - name: Stop sccache server
         run: sccache --stop-server || true
 
-      - run: cat sccache.log
+      - run: cat $HOME/sccache.log
