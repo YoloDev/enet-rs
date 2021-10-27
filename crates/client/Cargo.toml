@@ -1,7 +1,7 @@
 [package]
 name = "enet-client"
 version = "0.2.0"
-edition = "2018"
+edition = "2021"
 description = "eNet gateway client"
 license = "MIT"
 authors = ["Aleksander Heintz <alxandr@alxandr.me>"]
