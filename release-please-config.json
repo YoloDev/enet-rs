@@ -1,0 +1,8 @@
+{
+  "plugins": ["cargo-workspace"],
+  "release-type": "rust",
+  "packages": {
+    "crates/client": {},
+    "crates/proto": {}
+  }
+}
