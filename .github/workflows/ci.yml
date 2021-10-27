@@ -85,3 +85,5 @@ jobs:
         run: sccache --show-stats
       - name: Stop sccache server
         run: sccache --stop-server || true
+
+      - run: cat sccache.log
