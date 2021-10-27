@@ -46,12 +46,17 @@ jobs:
           brew update
           brew install sccache
 
-      - uses: MinoruSekine/setup-scoop
-        if: matrix.os == 'windows-latest'
       - name: Install sccache (windows-latest)
         if: matrix.os == 'windows-latest'
+        env:
+          LINK: https://github.com/mozilla/sccache/releases/download
+          SCCACHE_VERSION: "0.2.15"
         run: |
-          scoop install sccache
+          SCCACHE_FILE=sccache-$SCCACHE_VERSION-x86_64-pc-windows-msvc
+          mkdir -p $HOME/.local/bin
+          curl -L "$LINK/$SCCACHE_VERSION/$SCCACHE_FILE.tar.gz" | tar xz
+          mv -f $SCCACHE_FILE/sccache $HOME/.local/bin/sccache
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - uses: actions/checkout@v2
       - name: Install latest nightly
