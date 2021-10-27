@@ -1,3 +1,5 @@
+//! Protocol types for eNet.
+
 mod enc;
 mod req;
 mod res;
