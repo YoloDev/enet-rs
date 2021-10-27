@@ -12,6 +12,7 @@ env:
   RUST_BACKTRACE: full
   RUSTC_WRAPPER: sccache
   SCCACHE_IDLE_TIMEOUT: "0"
+  SCCACHE_BUCKET: yolodev-sccache
   AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
 
@@ -38,6 +39,7 @@ jobs:
           mkdir -p $HOME/.local/bin
           curl -L "$LINK/v$SCCACHE_VERSION/$SCCACHE_FILE.tar.gz" | tar xz
           mv -f $SCCACHE_FILE/sccache-dist $HOME/.local/bin/sccache
+          chmod +x $HOME/.local/bin/sccache
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Install sccache (macos-latest)
@@ -57,7 +59,8 @@ jobs:
           mkdir -p $HOME/.local/bin
           curl -L "$LINK/v$SCCACHE_VERSION/$SCCACHE_FILE.tar.gz" | tar xz
           mv -f $SCCACHE_FILE/sccache.exe $HOME/.local/bin/sccache.exe
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          echo "$HOME\\.local\\bin" >> $GITHUB_PATH
+          cat $GITHUB_PATH
 
       - uses: actions/checkout@v2
       - name: Install latest nightly
