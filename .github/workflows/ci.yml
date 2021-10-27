@@ -12,11 +12,9 @@ env:
   RUST_BACKTRACE: full
   RUSTC_WRAPPER: sccache
   SCCACHE_IDLE_TIMEOUT: "0"
-  SCCACHE_BUCKET: yolodev-sccache
-  SCCACHE_S3_USE_SSL: "true"
-  AWS_ACCESS_KEY_ID: ${{ secrets.SCCACHE_AWS_ACCESS_KEY_ID }}
-  AWS_SECRET_ACCESS_KEY: ${{ secrets.SCCACHE_AWS_SECRET_ACCESS_KEY }}
-  RUST_LOG: sccache=trace
+  SCCACHE_AZURE_BLOB_CONTAINER: sccache1
+  SCCACHE_AZURE_CONNECTION_STRING: ${{ secrets.SCCACHE_AZURE_CONNECTION_STRING }}
+  # RUST_LOG: sccache=trace
 
 jobs:
   test:
@@ -74,24 +72,24 @@ jobs:
 
       - name: Start sccache server
         run: sccache --start-server
-        env:
-          SCCACHE_ERROR_LOG: ${{ runner.temp }}/sccache.log
+        # env:
+        #   SCCACHE_ERROR_LOG: ${{ runner.temp }}/sccache.log
 
       - name: Run tests
         uses: actions-rs/cargo@v1
         with:
           command: test
           args: --all --all-features
-        env:
-          SCCACHE_ERROR_LOG: ${{ runner.temp }}/sccache.log
+        # env:
+        #   SCCACHE_ERROR_LOG: ${{ runner.temp }}/sccache.log
 
       - name: Print sccache stats
         run: sccache --show-stats
-        env:
-          SCCACHE_ERROR_LOG: ${{ runner.temp }}/sccache.log
+        # env:
+        #   SCCACHE_ERROR_LOG: ${{ runner.temp }}/sccache.log
       - name: Stop sccache server
         run: sccache --stop-server || true
-        env:
-          SCCACHE_ERROR_LOG: ${{ runner.temp }}/sccache.log
+        # env:
+        #   SCCACHE_ERROR_LOG: ${{ runner.temp }}/sccache.log
 
       - run: cat ${{ runner.temp }}/sccache.log
