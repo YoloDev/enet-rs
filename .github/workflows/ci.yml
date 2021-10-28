@@ -10,86 +10,34 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: full
-  RUSTC_WRAPPER: sccache
-  SCCACHE_IDLE_TIMEOUT: "0"
-  SCCACHE_AZURE_BLOB_CONTAINER: sccache1
-  SCCACHE_AZURE_CONNECTION_STRING: ${{ secrets.SCCACHE_AZURE_CONNECTION_STRING }}
-  # RUST_LOG: sccache=trace
 
 jobs:
   test:
     name: Test
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
+      # Always run main branch builds to completion.
+      fail-fast: ${{ github.event_name == 'pull_request' ||
+        (github.ref != 'refs/heads/main' &&
+        !startsWith(github.ref, 'refs/tags/')) }}
       matrix:
         os: [macos-latest, windows-latest, ubuntu-latest]
 
     steps:
-      - run: git config --global core.autocrlf false
-        name: Disable autocrlf
-
-      - name: Install sccache (ubuntu-latest)
-        if: matrix.os == 'ubuntu-latest'
-        env:
-          LINK: https://github.com/mozilla/sccache/releases/download
-          SCCACHE_VERSION: "0.2.15"
+      - name: Configure git
         run: |
-          SCCACHE_FILE=sccache-v$SCCACHE_VERSION-x86_64-unknown-linux-musl
-          mkdir -p $HOME/.local/bin
-          curl -L "$LINK/v$SCCACHE_VERSION/$SCCACHE_FILE.tar.gz" | tar xz
-          mv -f $SCCACHE_FILE/sccache $HOME/.local/bin/sccache
-          chmod +x $HOME/.local/bin/sccache
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
-
-      - name: Install sccache (macos-latest)
-        if: matrix.os == 'macos-latest'
-        run: |
-          brew update
-          brew install sccache
-
-      - name: Install sccache (windows-latest)
-        if: matrix.os == 'windows-latest'
-        shell: bash
-        env:
-          LINK: https://github.com/mozilla/sccache/releases/download
-          SCCACHE_VERSION: "0.2.15"
-        run: |
-          SCCACHE_FILE=sccache-v$SCCACHE_VERSION-x86_64-pc-windows-msvc
-          mkdir -p $HOME/.local/bin
-          curl -L "$LINK/v$SCCACHE_VERSION/$SCCACHE_FILE.tar.gz" | tar xz
-          mv -f $SCCACHE_FILE/sccache.exe $HOME/.local/bin/sccache.exe
-          echo "$USERPROFILE\\.local\\bin" >> $GITHUB_PATH
-          cat $GITHUB_PATH
+          git config --global core.autocrlf false
+          git config --global core.symlinks true
+          git config --global fetch.parallel 32
 
       - uses: actions/checkout@v2
-      - name: Install latest nightly
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: nightly
-          profile: minimal
-          override: true
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: Start sccache server
-        run: sccache --start-server
-        # env:
-        #   SCCACHE_ERROR_LOG: ${{ runner.temp }}/sccache.log
+      - name: Clippy
+        run: cargo clippy -- -D warnings
 
       - name: Run tests
         uses: actions-rs/cargo@v1
         with:
           command: test
           args: --all --all-features
-        # env:
-        #   SCCACHE_ERROR_LOG: ${{ runner.temp }}/sccache.log
-
-      - name: Print sccache stats
-        run: sccache --show-stats
-        # env:
-        #   SCCACHE_ERROR_LOG: ${{ runner.temp }}/sccache.log
-      - name: Stop sccache server
-        run: sccache --stop-server || true
-        # env:
-        #   SCCACHE_ERROR_LOG: ${{ runner.temp }}/sccache.log
-
-      # - run: cat ${{ runner.temp }}/sccache.log
