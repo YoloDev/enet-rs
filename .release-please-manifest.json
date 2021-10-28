@@ -1,4 +1,1 @@
-{
-  "crates/client": "0.2.0",
-  "crates/proto": "0.1.6"
-}
+{"crates/client":"0.2.1","crates/proto":"0.1.7"}

@@ -1,6 +1,6 @@
 [package]
 name = "enet-client"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "eNet gateway client"
 license = "MIT"
@@ -20,4 +20,4 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.6", features = ["codec"] }
 tracing = "0.1"
 
-enet-proto = { path = "../proto", version = "^0.1.6" }
+enet-proto = { path = "../proto", version = "0.1.7" }
