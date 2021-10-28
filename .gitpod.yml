@@ -1,0 +1,11 @@
+tasks:
+  - init: |
+      cargo install cargo-watch
+      cargo build
+    command: cargo watch -x test
+
+vscode:
+  extensions:
+    - matklad.rust-analyzer
+    - tamasfe.even-better-toml
+    - serayuzgur.crates

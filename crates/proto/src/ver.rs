@@ -60,3 +60,23 @@ impl<'de> Deserialize<'de> for ProtocolVersion {
     deserializer.deserialize_str(ProtocolVisitor)
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use serde_test::{assert_tokens, Token};
+
+  #[test]
+  fn protocol_version_zerozerothree_serde() {
+    let version = ProtocolVersion::ZeroZeroThree;
+
+    assert_tokens(&version, &[Token::Str("0.03")])
+  }
+
+  #[test]
+  fn protocol_version_other_serde() {
+    let version = ProtocolVersion::Unknown("other".into());
+
+    assert_tokens(&version, &[Token::Str("other")])
+  }
+}
