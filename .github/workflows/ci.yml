@@ -65,4 +65,4 @@ jobs:
       - name: Install cargo plugins
         run: cargo install cargo-workspaces
       - name: Publish
-        run: cargo workspaces publish --from-git --yes
+        run: cargo workspaces publish --from-git --yes --token "${{ secrets.CRATES_IO_TOKEN }}"
