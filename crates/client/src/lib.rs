@@ -1,3 +1,5 @@
+//! Client for interacting with eNet gateways.
+
 macro_rules! bail {
   ($err:expr) => {
     return Err($err.into())

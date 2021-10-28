@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use smol_str::SmolStr;
 use std::fmt;
 
+/// eNet protocol version.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProtocolVersion {
   ZeroZeroThree,
