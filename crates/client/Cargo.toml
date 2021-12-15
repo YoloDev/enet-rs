@@ -10,7 +10,7 @@ repository = "https://github.com/YoloDev/enet-rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-backoff = { version = "0.3", features = ["futures", "tokio"] }
+backoff = { version = "0.4", features = ["futures", "tokio"] }
 bytes = "1"
 eventuals = "0.6"
 futures = "0.3"
