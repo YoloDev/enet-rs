@@ -15,7 +15,7 @@ bytes = "1"
 eventuals = "0.6"
 futures = "0.3"
 paste = "1"
-thiserror = "1"
+thiserror = "1.0.59"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 tracing = "0.1"
