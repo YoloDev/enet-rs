@@ -24,4 +24,4 @@ thiserror = "1"
 tracing = "0.1"
 
 [dev-dependencies]
-serde_test = "1"
+serde_test = "1.0.176"
