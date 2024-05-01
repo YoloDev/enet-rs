@@ -11,7 +11,7 @@ repository = "https://github.com/YoloDev/enet-rs"
 
 [dependencies]
 bytes = "1"
-color-eyre = "0.6"
+color-eyre = "0.6.3"
 derive_more = "0.99"
 enum-kinds = "0.5"
 lazy_static = "1"
