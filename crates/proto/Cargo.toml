@@ -13,7 +13,7 @@ repository = "https://github.com/YoloDev/enet-rs"
 bytes = "1"
 color-eyre = "0.6"
 derive_more = "0.99"
-enum-kinds = "0.5"
+enum-kinds = "0.5.1"
 lazy_static = "1"
 regex = { version = "1", default-features = false, features = ["std", "perf"] }
 serde = { version = "1", features = ["derive"] }
